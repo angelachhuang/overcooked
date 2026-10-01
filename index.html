@@ -1,0 +1,1556 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mini Overcooked - Canvas 2D 極簡烹飪速食店</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #0b1120;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            background-color: #0f172a;
+        }
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        /* 虛擬搖桿底座 */
+        .joystick-base {
+            width: 110px;
+            height: 110px;
+            background: rgba(255, 255, 255, 0.12);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-radius: 50%;
+            position: absolute;
+            bottom: 24px;
+            left: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+        .joystick-thumb {
+            width: 48px;
+            height: 48px;
+            background: #f97316;
+            border-radius: 50%;
+            box-shadow: 0 4px 12px rgba(249, 115, 22, 0.5);
+            transform: translate(0, 0);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-white select-none">
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- 頂部與底部 HUD 介面 -->
+    <div class="ui-layer flex flex-col justify-between p-3 md:p-4">
+        <!-- 頂部資訊列：動態訂單卡片與計時/分數 -->
+        <div class="flex flex-col md:flex-row justify-between items-start gap-2.5 w-full">
+            <!-- 動態訂單列表 -->
+            <div id="orders-container" class="flex flex-wrap gap-2 max-w-2xl">
+                <!-- 訂單卡片由 JS 動態生成 -->
+            </div>
+
+            <!-- 計時與積分計數器 -->
+            <div class="flex items-center gap-2 md:gap-3 bg-slate-900/90 backdrop-blur-md px-3 md:px-4 py-2 rounded-2xl border border-slate-700/80 shadow-xl self-end md:self-start">
+                <button id="btn-audio-toggle" class="interactive px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold transition">
+                    🔊 音樂: 開
+                </button>
+                <div class="h-5 w-[1px] bg-slate-700"></div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-lg">⏱️</span>
+                    <span id="timer-text" class="text-xl md:text-2xl font-black tracking-wider text-amber-400">01:00</span>
+                </div>
+                <div class="h-5 w-[1px] bg-slate-700"></div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-lg">🪙</span>
+                    <span id="score-text" class="text-xl md:text-2xl font-black tracking-wider text-emerald-400">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部提示與行動控制器 -->
+        <div class="w-full flex justify-between items-end pb-1">
+            <!-- 桌面鍵盤提示 -->
+            <div class="hidden md:flex flex-col gap-1 bg-slate-900/85 backdrop-blur-md px-3.5 py-2.5 rounded-xl border border-slate-800 text-[11px] text-slate-300">
+                <div class="font-bold text-amber-400 mb-0.5">🎮 操作指南 (鍵盤)</div>
+                <div><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono text-white">WASD</kbd> / 方向鍵：移動</div>
+                <div><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono text-white">Space</kbd> / <kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono text-white">E</kbd>：拿取 / 放置 / 出餐</div>
+                <div><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono text-white">F</kbd> 長按：砧板切菜</div>
+                <div><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-slate-700 font-mono text-white">Q</kbd>：拋擲手中生料</div>
+            </div>
+
+            <!-- 行動端虛擬搖桿 -->
+            <div id="touch-joystick" class="joystick-base interactive md:hidden">
+                <div id="joystick-thumb" class="joystick-thumb"></div>
+            </div>
+
+            <!-- 行動端虛擬按鈕 -->
+            <div class="flex gap-2 interactive md:hidden pb-1 pr-1">
+                <button id="btn-throw" class="w-13 h-13 p-3 rounded-2xl bg-indigo-600/90 active:scale-95 shadow-lg flex flex-col items-center justify-center font-bold text-[11px] border border-indigo-400/50">
+                    <span class="text-base leading-none">🚀</span>
+                    <span>拋擲</span>
+                </button>
+                <button id="btn-chop" class="w-13 h-13 p-3 rounded-2xl bg-amber-600/90 active:scale-95 shadow-lg flex flex-col items-center justify-center font-bold text-[11px] border border-amber-400/50">
+                    <span class="text-base leading-none">🔪</span>
+                    <span>切菜</span>
+                </button>
+                <button id="btn-interact" class="w-15 h-15 p-3.5 rounded-2xl bg-emerald-600 active:scale-95 shadow-xl flex flex-col items-center justify-center font-black text-xs border-2 border-emerald-300">
+                    <span class="text-lg leading-none">✋</span>
+                    <span>拿放</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 遊戲結束結算彈窗 -->
+    <div id="gameover-modal" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="bg-slate-800 border-2 border-amber-500 rounded-3xl p-6 max-w-sm w-full text-center shadow-2xl">
+            <h2 class="text-2xl md:text-3xl font-black text-amber-400 mb-1">打烊結算！</h2>
+            <p class="text-slate-400 text-xs mb-3">今日 60 秒出餐挑戰結束</p>
+            
+            <div id="star-rating" class="text-4xl my-2 tracking-widest">⭐⭐⭐</div>
+            
+            <div class="bg-slate-900/90 rounded-2xl p-3 my-4 border border-slate-700 flex justify-around items-center">
+                <div>
+                    <div class="text-[11px] text-slate-400 font-semibold">最終營業額</div>
+                    <div id="final-score" class="text-2xl md:text-3xl font-black text-emerald-400">0</div>
+                </div>
+                <div class="h-7 w-[1px] bg-slate-700"></div>
+                <div>
+                    <div class="text-[11px] text-slate-400 font-semibold">完成訂單</div>
+                    <div id="final-orders" class="text-2xl md:text-3xl font-black text-amber-300">0</div>
+                </div>
+            </div>
+
+            <button id="btn-restart" class="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-slate-950 font-black text-base rounded-2xl shadow-lg transition-transform active:scale-95 cursor-pointer">
+                再玩一局 🍳
+            </button>
+        </div>
+    </div>
+
+    <script>
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+                this.bgmPlaying = false;
+                this.bgmTimer = null;
+                this.isMuted = false;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+                if (!this.bgmPlaying && !this.isMuted) {
+                    this.startBGM();
+                }
+            }
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                if (this.isMuted) {
+                    this.stopBGM();
+                } else {
+                    this.init();
+                    this.startBGM();
+                }
+                return !this.isMuted;
+            }
+            startBGM() {
+                if (this.bgmPlaying || this.isMuted) return;
+                this.bgmPlaying = true;
+                const notes = [
+                    261.63, 329.63, 392.00, 523.25,
+                    293.66, 369.99, 440.00, 587.33,
+                    261.63, 329.63, 392.00, 493.88,
+                    220.00, 261.63, 329.63, 440.00
+                ];
+                let idx = 0;
+                this.bgmTimer = setInterval(() => {
+                    if (!this.ctx || this.isMuted) return;
+                    const f = notes[idx % notes.length];
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = (idx % 2 === 0) ? 'triangle' : 'sine';
+                    osc.frequency.setValueAtTime(f, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(0.03, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.18);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.2);
+                    idx++;
+                }, 220);
+            }
+            stopBGM() {
+                this.bgmPlaying = false;
+                if (this.bgmTimer) {
+                    clearInterval(this.bgmTimer);
+                    this.bgmTimer = null;
+                }
+            }
+            playChop() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                const baseF = 180 + Math.random() * 50;
+                osc.frequency.setValueAtTime(baseF, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(35, this.ctx.currentTime + 0.08);
+                gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.08);
+            }
+            playThrow() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(260, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(800, this.ctx.currentTime + 0.12);
+                gain.gain.setValueAtTime(0.25, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.12);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.12);
+            }
+            playSuccess() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const freqs = [523.25, 659.25, 783.99, 1046.50];
+                freqs.forEach((f, i) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(f, this.ctx.currentTime + i * 0.06);
+                    gain.gain.setValueAtTime(0.2, this.ctx.currentTime + i * 0.06);
+                    gain.gain.linearRampToValueAtTime(0.005, this.ctx.currentTime + i * 0.06 + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(this.ctx.currentTime + i * 0.06);
+                    osc.stop(this.ctx.currentTime + i * 0.06 + 0.25);
+                });
+            }
+            playError() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+                osc.frequency.linearRampToValueAtTime(80, this.ctx.currentTime + 0.25);
+                gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.25);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.25);
+            }
+            playSizzle() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const bufferSize = Math.floor(this.ctx.sampleRate * 0.05);
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+                noise.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+            playTick() {
+                this.init();
+                if (!this.ctx || this.isMuted) return;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+                gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.05);
+            }
+        }
+        const sfx = new SoundFX();
+
+        const ItemType = {
+            MEAT: 'MEAT',
+            TOMATO: 'TOMATO',
+            LETTUCE: 'LETTUCE',
+            CHEESE: 'CHEESE',
+            BREAD: 'BREAD',
+            BURGER: 'BURGER',
+            CHEESE_BURGER: 'CHEESE_BURGER',
+            CAPRESE: 'CAPRESE',
+            SALAD: 'SALAD',
+            MEAT_SALAD: 'MEAT_SALAD'
+        };
+
+        const ItemState = {
+            RAW: 'RAW',
+            CHOPPED: 'CHOPPED',
+            COOKED: 'COOKED',
+            BURNED: 'BURNED'
+        };
+
+        const RECIPES = [
+            { 
+                id: 'R_CHEESE_BURGER', 
+                name: '極品起司漢堡', 
+                icon: '🍔', 
+                type: ItemType.CHEESE_BURGER, 
+                state: ItemState.COOKED, 
+                score: 130,
+                ingredients: [
+                    { icon: '🥩', note: '熟排', bg: 'bg-amber-950/80 border-amber-500/40 text-amber-200' },
+                    { icon: '🧀', note: '切片', bg: 'bg-yellow-950/80 border-yellow-500/40 text-yellow-200' },
+                    { icon: '🍞', note: '麵包', bg: 'bg-orange-950/80 border-orange-500/40 text-orange-200' }
+                ]
+            },
+            { 
+                id: 'R_BURGER', 
+                name: '經典牛肉漢堡', 
+                icon: '🍔', 
+                type: ItemType.BURGER, 
+                state: ItemState.COOKED, 
+                score: 95,
+                ingredients: [
+                    { icon: '🥩', note: '熟排', bg: 'bg-amber-950/80 border-amber-500/40 text-amber-200' },
+                    { icon: '🍞', note: '麵包', bg: 'bg-orange-950/80 border-orange-500/40 text-orange-200' }
+                ]
+            },
+            { 
+                id: 'R_STEAK', 
+                name: '香煎雪花牛排', 
+                icon: '🥩', 
+                type: ItemType.MEAT, 
+                state: ItemState.COOKED, 
+                score: 65,
+                ingredients: [
+                    { icon: '🥩', note: '切+煎', bg: 'bg-rose-950/80 border-rose-500/40 text-rose-200' }
+                ]
+            },
+            { 
+                id: 'R_CAPRESE', 
+                name: '起司蕃茄切盤', 
+                icon: '🧀🍅', 
+                type: ItemType.CAPRESE, 
+                state: ItemState.CHOPPED, 
+                score: 85,
+                ingredients: [
+                    { icon: '🍅', note: '切片', bg: 'bg-red-950/80 border-red-500/40 text-red-200' },
+                    { icon: '🧀', note: '切片', bg: 'bg-yellow-950/80 border-yellow-500/40 text-yellow-200' }
+                ]
+            },
+            { 
+                id: 'R_SALAD', 
+                name: '花園沙拉', 
+                icon: '🥗', 
+                type: ItemType.SALAD, 
+                state: ItemState.CHOPPED, 
+                score: 80,
+                ingredients: [
+                    { icon: '🍅', note: '切片', bg: 'bg-red-950/80 border-red-500/40 text-red-200' },
+                    { icon: '🥬', note: '切碎', bg: 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200' }
+                ]
+            },
+            { 
+                id: 'R_MEAT_SALAD', 
+                name: '炙燒牛排沙拉', 
+                icon: '🍱', 
+                type: ItemType.MEAT_SALAD, 
+                state: ItemState.COOKED, 
+                score: 110,
+                ingredients: [
+                    { icon: '🥩', note: '熟排', bg: 'bg-amber-950/80 border-amber-500/40 text-amber-200' },
+                    { icon: '🥬', note: '切碎', bg: 'bg-emerald-950/80 border-emerald-500/40 text-emerald-200' }
+                ]
+            }
+        ];
+
+        const CounterType = {
+            CRATE_MEAT: 'CRATE_MEAT',
+            CRATE_TOMATO: 'CRATE_TOMATO',
+            CRATE_LETTUCE: 'CRATE_LETTUCE',
+            CRATE_CHEESE: 'CRATE_CHEESE',
+            CRATE_BREAD: 'CRATE_BREAD',
+            CHOPPING: 'CHOPPING',
+            STOVE: 'STOVE',
+            DELIVERY: 'DELIVERY',
+            TRASH: 'TRASH',
+            EMPTY_DESK: 'EMPTY_DESK'
+        };
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 確保支援相容性圓角矩形
+        if (!CanvasRenderingContext2D.prototype.fillRoundRect) {
+            CanvasRenderingContext2D.prototype.fillRoundRect = function(x, y, w, h, r) {
+                const radius = typeof r === 'number' ? r : 8;
+                this.beginPath();
+                if (this.roundRect) {
+                    this.roundRect(x, y, w, h, [radius]);
+                } else {
+                    this.moveTo(x + radius, y);
+                    this.arcTo(x + w, y, x + w, y + h, radius);
+                    this.arcTo(x + w, y + h, x, y + h, radius);
+                    this.arcTo(x, y + h, x, y, radius);
+                    this.arcTo(x, y, x + w, y, radius);
+                    this.closePath();
+                }
+                this.fill();
+            };
+        }
+
+        if (!CanvasRenderingContext2D.prototype.strokeRoundRect) {
+            CanvasRenderingContext2D.prototype.strokeRoundRect = function(x, y, w, h, r) {
+                const radius = typeof r === 'number' ? r : 8;
+                this.beginPath();
+                if (this.roundRect) {
+                    this.roundRect(x, y, w, h, [radius]);
+                } else {
+                    this.moveTo(x + radius, y);
+                    this.arcTo(x + w, y, x + w, y + h, radius);
+                    this.arcTo(x + w, y + h, x, y + h, radius);
+                    this.arcTo(x, y + h, x, y, radius);
+                    this.arcTo(x, y, x + w, y, radius);
+                    this.closePath();
+                }
+                this.stroke();
+            };
+        }
+
+        let dpr = window.devicePixelRatio || 1;
+        let viewScale = 1;
+
+        let gameTime = 60; // 60 秒限時
+        let score = 0;
+        let completedOrders = 0;
+        let activeOrders = [];
+        let isGameOver = false;
+        let orderTimer = 0;
+        let lastTime = performance.now();
+        let lastTickSec = -1;
+
+        let particles = [];
+        let floatTexts = [];
+        let thrownItems = [];
+
+        // 廚師本體資料（半徑調整至 22px，走位更靈活）
+        const player = {
+            x: 0,
+            y: 25,
+            radius: 22,
+            speed: 280,
+            dirX: 0,
+            dirY: 1,
+            heldItem: null,
+            targetCounter: null,
+            bounce: 0
+        };
+
+        let counters = [];
+
+        function buildKitchenLayout() {
+            counters = [];
+            const W = 58;
+            const H = 58;
+
+            // 後排 5 大食材區 (Y = -135) - 均勻分布，兩側預留轉角空間
+            counters.push({ x: -140, y: -135, w: W, h: H, type: CounterType.CRATE_BREAD, name: '麵包箱', icon: '🍞' });
+            counters.push({ x: -70,  y: -135, w: W, h: H, type: CounterType.CRATE_MEAT, name: '生肉箱', icon: '🥩' });
+            counters.push({ x: 0,    y: -135, w: W, h: H, type: CounterType.CRATE_TOMATO, name: '蕃茄箱', icon: '🍅' });
+            counters.push({ x: 70,   y: -135, w: W, h: H, type: CounterType.CRATE_LETTUCE, name: '生菜箱', icon: '🥬' });
+            counters.push({ x: 140,  y: -135, w: W, h: H, type: CounterType.CRATE_CHEESE, name: '起司箱', icon: '🧀' });
+
+            // 左側排 (X = -185) - 雙砧板與備料檯（向下移開，留出麵包箱正下方寬敞動線）
+            counters.push({ x: -185, y: -25,  w: W, h: H, type: CounterType.CHOPPING, name: '砧板 1', icon: '🔪' });
+            counters.push({ x: -185, y: 45,   w: W, h: H, type: CounterType.CHOPPING, name: '砧板 2', icon: '🔪' });
+            counters.push({ x: -185, y: 115,  w: W, h: H, type: CounterType.EMPTY_DESK, name: '備料檯', icon: '🪑' });
+
+            // 右側排 (X = 185) - 雙平底鍋與垃圾桶（向下移開，留出起司箱正下方寬敞動線）
+            counters.push({ x: 185,  y: -25,  w: W, h: H, type: CounterType.STOVE, name: '平底鍋 1', icon: '🍳' });
+            counters.push({ x: 185,  y: 45,   w: W, h: H, type: CounterType.STOVE, name: '平底鍋 2', icon: '🍳' });
+            counters.push({ x: 185,  y: 115,  w: W, h: H, type: CounterType.TRASH, name: '垃圾桶', icon: '🗑️' });
+
+            // 前排中島出餐口 (Y = 145)
+            counters.push({ x: -55,  y: 145,  w: 85, h: 56, type: CounterType.DELIVERY, name: '出餐口', icon: '🛎️' });
+            counters.push({ x: 55,   y: 145,  w: 85, h: 56, type: CounterType.DELIVERY, name: '出餐口', icon: '🛎' });
+
+            counters.forEach(c => {
+                c.item = null;
+                c.timer = 0;
+                c.chopProgress = 0;
+            });
+        }
+
+        const btnAudioToggle = document.getElementById('btn-audio-toggle');
+        if (btnAudioToggle) {
+            btnAudioToggle.addEventListener('click', () => {
+                const isOn = sfx.toggleMute();
+                btnAudioToggle.innerText = isOn ? '🔊 音樂: 開' : '🔇 音樂: 關';
+            });
+        }
+
+        const keys = {
+            up: false, down: false, left: false, right: false,
+            interact: false, chop: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            sfx.init();
+            if (isGameOver) return;
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': keys.up = true; break;
+                case 'KeyS': case 'ArrowDown': keys.down = true; break;
+                case 'KeyA': case 'ArrowLeft': keys.left = true; break;
+                case 'KeyD': case 'ArrowRight': keys.right = true; break;
+                case 'Space': case 'KeyE':
+                    if (!keys.interact) { handleInteract(); keys.interact = true; }
+                    break;
+                case 'KeyF': keys.chop = true; break;
+                case 'KeyQ': handleThrow(); break;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            switch(e.code) {
+                case 'KeyW': case 'ArrowUp': keys.up = false; break;
+                case 'KeyS': case 'ArrowDown': keys.down = false; break;
+                case 'KeyA': case 'ArrowLeft': keys.left = false; break;
+                case 'KeyD': case 'ArrowRight': keys.right = false; break;
+                case 'Space': case 'KeyE': keys.interact = false; break;
+                case 'KeyF': keys.chop = false; break;
+            }
+        });
+
+        // 手機虛擬控制鈕
+        const btnInteract = document.getElementById('btn-interact');
+        const btnChop = document.getElementById('btn-chop');
+        const btnThrow = document.getElementById('btn-throw');
+
+        btnInteract.addEventListener('touchstart', (e) => { e.preventDefault(); sfx.init(); handleInteract(); });
+        btnChop.addEventListener('touchstart', (e) => { e.preventDefault(); sfx.init(); keys.chop = true; });
+        btnChop.addEventListener('touchend', (e) => { e.preventDefault(); keys.chop = false; });
+        btnThrow.addEventListener('touchstart', (e) => { e.preventDefault(); sfx.init(); handleThrow(); });
+
+        // 虛擬搖桿支援
+        let joystickActive = false;
+        let joyVector = { x: 0, y: 0 };
+        const joyBase = document.getElementById('touch-joystick');
+        const joyThumb = document.getElementById('joystick-thumb');
+
+        joyBase.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            sfx.init();
+            joystickActive = true;
+            updateJoystick(e.touches[0]);
+        });
+        window.addEventListener('touchmove', (e) => {
+            if (!joystickActive) return;
+            for (let i = 0; i < e.touches.length; i++) {
+                const t = e.touches[i];
+                const rect = joyBase.getBoundingClientRect();
+                if (Math.hypot(t.clientX - (rect.left + rect.width / 2), t.clientY - (rect.top + rect.height / 2)) < 130) {
+                    updateJoystick(t);
+                    break;
+                }
+            }
+        });
+        window.addEventListener('touchend', () => {
+            joystickActive = false;
+            joyVector = { x: 0, y: 0 };
+            joyThumb.style.transform = `translate(0px, 0px)`;
+        });
+
+        function updateJoystick(touch) {
+            const rect = joyBase.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            let dx = touch.clientX - cx;
+            let dy = touch.clientY - cy;
+            const dist = Math.hypot(dx, dy);
+            const maxR = 40;
+            if (dist > maxR) {
+                dx = (dx / dist) * maxR;
+                dy = (dy / dist) * maxR;
+            }
+            joyThumb.style.transform = `translate(${dx}px, ${dy}px)`;
+            joyVector = { x: dx / maxR, y: dy / maxR };
+        }
+
+        function getTargetCounter() {
+            let closest = null;
+            let bestScore = -Infinity;
+
+            for (let c of counters) {
+                const dx = c.x - player.x;
+                const dy = c.y - player.y;
+                const dist = Math.hypot(dx, dy);
+
+                // 檢測距離寬容度至 115 像素
+                if (dist > 115) continue;
+
+                // 面朝方向向量內積 (Dot product)
+                const dot = (dx * player.dirX + dy * player.dirY) / (dist || 1);
+
+                // 顯著強化朝向權重，確保正面對準時精準選中當前箱子
+                if (dot > 0.05) {
+                    const sc = Math.pow(Math.max(0, dot), 1.6) * 4.5 - (dist / 35);
+                    if (sc > bestScore) {
+                        bestScore = sc;
+                        closest = c;
+                    }
+                }
+            }
+            return closest;
+        }
+
+        function handleInteract() {
+            if (isGameOver) return;
+            const counter = getTargetCounter();
+            if (!counter) return;
+
+            // 1. 垃圾桶優先清除
+            if (counter.type === CounterType.TRASH) {
+                if (player.heldItem) {
+                    player.heldItem = null;
+                    sfx.playError();
+                    addFloatText(counter.x, counter.y - 20, '已丟棄 🗑️', '#ef4444');
+                } else if (counter.item) {
+                    counter.item = null;
+                    counter.timer = 0;
+                    sfx.playError();
+                    addFloatText(counter.x, counter.y - 20, '已清理 🗑️️', '#ef4444');
+                }
+                return;
+            }
+
+            // 2. 食材箱拿取生料
+            if (counter.type === CounterType.CRATE_BREAD && !player.heldItem) {
+                player.heldItem = { type: ItemType.BREAD, state: ItemState.COOKED };
+                sfx.playThrow();
+                addFloatText(player.x, player.y - 30, '+漢堡麵包 🍞', '#f59e0b');
+                return;
+            }
+            if (counter.type === CounterType.CRATE_MEAT && !player.heldItem) {
+                player.heldItem = { type: ItemType.MEAT, state: ItemState.RAW };
+                sfx.playThrow();
+                addFloatText(player.x, player.y - 30, '+生肉 🥩', '#f87171');
+                return;
+            }
+            if (counter.type === CounterType.CRATE_TOMATO && !player.heldItem) {
+                player.heldItem = { type: ItemType.TOMATO, state: ItemState.RAW };
+                sfx.playThrow();
+                addFloatText(player.x, player.y - 30, '+蕃茄 🍅', '#f43f5e');
+                return;
+            }
+            if (counter.type === CounterType.CRATE_LETTUCE && !player.heldItem) {
+                player.heldItem = { type: ItemType.LETTUCE, state: ItemState.RAW };
+                sfx.playThrow();
+                addFloatText(player.x, player.y - 30, '+生菜 🥬', '#22c55e');
+                return;
+            }
+            if (counter.type === CounterType.CRATE_CHEESE && !player.heldItem) {
+                player.heldItem = { type: ItemType.CHEESE, state: ItemState.RAW };
+                sfx.playThrow();
+                addFloatText(player.x, player.y - 30, '+起司塊 🧀', '#fbbf24');
+                return;
+            }
+
+            // 3. 出餐口交付
+            if (counter.type === CounterType.DELIVERY) {
+                if (player.heldItem) submitOrder(player.heldItem);
+                return;
+            }
+
+            // 4. 一般檯面拿起 / 放置 / 組合
+            if (counter.item && !player.heldItem) {
+                player.heldItem = counter.item;
+                counter.item = null;
+                counter.timer = 0;
+                counter.chopProgress = 0;
+            } else if (!counter.item && player.heldItem) {
+                if (counter.type === CounterType.STOVE) {
+                    if (player.heldItem.type !== ItemType.MEAT || player.heldItem.state !== ItemState.CHOPPED) {
+                        addFloatText(counter.x, counter.y - 30, '需切碎肉排才能煎!', '#f59e0b');
+                        sfx.playError();
+                        return;
+                    }
+                }
+                counter.item = player.heldItem;
+                player.heldItem = null;
+                counter.timer = 0;
+                counter.chopProgress = 0;
+            } else if (counter.item && player.heldItem) {
+                checkDishCombination(counter, player.heldItem);
+            }
+        }
+
+        function checkDishCombination(counter, incoming) {
+            const cur = counter.item;
+
+            // A1. 麵包 + 熟肉排 => 經典牛肉漢堡
+            const hasBread = (cur.type === ItemType.BREAD && incoming.type === ItemType.MEAT && incoming.state === ItemState.COOKED);
+            const hasBread2 = (incoming.type === ItemType.BREAD && cur.type === ItemType.MEAT && cur.state === ItemState.COOKED);
+            if (hasBread || hasBread2) {
+                counter.item = { type: ItemType.BURGER, state: ItemState.COOKED };
+                player.heldItem = null;
+                sfx.playSuccess();
+                addFloatText(counter.x, counter.y - 30, '🍔 經典牛肉漢堡!', '#f59e0b');
+                spawnConfetti(counter.x, counter.y);
+                return;
+            }
+
+            // A2. 經典漢堡 + 切片起司 => 極品起司漢堡
+            const bAndC = (cur.type === ItemType.BURGER && incoming.type === ItemType.CHEESE && incoming.state === ItemState.CHOPPED);
+            const bAndC2 = (incoming.type === ItemType.BURGER && cur.type === ItemType.CHEESE && cur.state === ItemState.CHOPPED);
+            if (bAndC || bAndC2) {
+                counter.item = { type: ItemType.CHEESE_BURGER, state: ItemState.COOKED };
+                player.heldItem = null;
+                sfx.playSuccess();
+                addFloatText(counter.x, counter.y - 30, '🍔 極品起司漢堡!!', '#fbbf24');
+                spawnConfetti(counter.x, counter.y);
+                return;
+            }
+
+            // B. 切片蕃茄 + 切片起司 => 起司蕃茄拼盤
+            const isTomCheese = (cur.type === ItemType.TOMATO && cur.state === ItemState.CHOPPED && incoming.type === ItemType.CHEESE && incoming.state === ItemState.CHOPPED);
+            const isTomCheese2 = (incoming.type === ItemType.TOMATO && incoming.state === ItemState.CHOPPED && cur.type === ItemType.CHEESE && cur.state === ItemState.CHOPPED);
+            if (isTomCheese || isTomCheese2) {
+                counter.item = { type: ItemType.CAPRESE, state: ItemState.CHOPPED };
+                player.heldItem = null;
+                sfx.playSuccess();
+                addFloatText(counter.x, counter.y - 30, '🧀🍅 起司蕃茄拼盤!', '#f43f5e');
+                spawnConfetti(counter.x, counter.y);
+                return;
+            }
+
+            // C. 切片蕃茄 + 切碎生菜 => 沙拉
+            const isTom = (cur.type === ItemType.TOMATO && incoming.type === ItemType.LETTUCE);
+            const isLet = (cur.type === ItemType.LETTUCE && incoming.type === ItemType.TOMATO);
+            if ((isTom || isLet) && cur.state === ItemState.CHOPPED && incoming.state === ItemState.CHOPPED) {
+                counter.item = { type: ItemType.SALAD, state: ItemState.CHOPPED };
+                player.heldItem = null;
+                sfx.playSuccess();
+                addFloatText(counter.x, counter.y - 30, '🥗 花園沙拉完成!', '#10b981');
+                spawnConfetti(counter.x, counter.y);
+                return;
+            }
+
+            // D. 熟牛排 + 切碎生菜 => 炙燒牛排沙拉
+            const hasSteak = (cur.type === ItemType.MEAT && cur.state === ItemState.COOKED && incoming.type === ItemType.LETTUCE && incoming.state === ItemState.CHOPPED);
+            const hasGreen = (incoming.type === ItemType.MEAT && incoming.state === ItemState.COOKED && cur.type === ItemType.LETTUCE && cur.state === ItemState.CHOPPED);
+            if (hasSteak || hasGreen) {
+                counter.item = { type: ItemType.MEAT_SALAD, state: ItemState.COOKED };
+                player.heldItem = null;
+                sfx.playSuccess();
+                addFloatText(counter.x, counter.y - 30, '🍱 炙燒牛排沙拉!', '#f59e0b');
+                spawnConfetti(counter.x, counter.y);
+                return;
+            }
+        }
+
+        function handleThrow() {
+            if (!player.heldItem) return;
+            if (player.heldItem.state !== ItemState.RAW) {
+                addFloatText(player.x, player.y - 35, '熟食/半成品不可丟擲!', '#ef4444');
+                return;
+            }
+            sfx.playThrow();
+            const item = player.heldItem;
+            player.heldItem = null;
+
+            thrownItems.push({
+                item: item,
+                x: player.x,
+                y: player.y,
+                vx: player.dirX * 440,
+                vy: player.dirY * 440,
+                life: 0.55
+            });
+        }
+
+        function updateThrownItems(delta) {
+            for (let i = thrownItems.length - 1; i >= 0; i--) {
+                const t = thrownItems[i];
+                t.x += t.vx * delta;
+                t.y += t.vy * delta;
+                t.life -= delta;
+
+                for (let c of counters) {
+                    if (!c.item && !c.type.startsWith('CRATE')) {
+                        if (Math.hypot(t.x - c.x, t.y - c.y) < 34) {
+                            c.item = t.item;
+                            sfx.playSuccess();
+                            addFloatText(c.x, c.y - 25, '精準接住! 🎯', '#38bdf8');
+                            thrownItems.splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+
+                if (t.life <= 0) {
+                    thrownItems.splice(i, 1);
+                }
+            }
+        }
+
+        function updateCounters(delta) {
+            counters.forEach(c => {
+                // 1. 砧板切菜
+                if (c.type === CounterType.CHOPPING && c.item && c.item.state === ItemState.RAW) {
+                    if (keys.chop && player.targetCounter === c) {
+                        c.chopProgress += delta * 1.5;
+                        sfx.playChop();
+                        spawnChopParticles(c.x, c.y, c.item.type);
+
+                        if (c.chopProgress >= 1.0) {
+                            c.item.state = ItemState.CHOPPED;
+                            c.chopProgress = 0;
+                            sfx.playSuccess();
+                            addFloatText(c.x, c.y - 30, '切碎完成! 🔪', '#38bdf8');
+                        }
+                    }
+                }
+
+                // 2. 平底鍋煎烤與超時焦黑
+                if (c.type === CounterType.STOVE && c.item) {
+                    if (c.item.type === ItemType.MEAT && c.item.state === ItemState.CHOPPED) {
+                        c.timer += delta;
+                        sfx.playSizzle();
+                        spawnSizzleSmoke(c.x, c.y, '#f8fafc');
+
+                        if (c.timer >= 3.6) {
+                            c.item.state = ItemState.COOKED;
+                            c.timer = 0;
+                            sfx.playSuccess();
+                            addFloatText(c.x, c.y - 30, '香煎完成! 🥩', '#10b981');
+                        }
+                    } else if (c.item.state === ItemState.COOKED) {
+                        c.timer += delta;
+                        if (c.timer >= 4.0) {
+                            c.item.state = ItemState.BURNED;
+                            c.timer = 0;
+                            sfx.playError();
+                            addFloatText(c.x, c.y - 30, '焦黑報廢! ⚠️', '#ef4444');
+                        }
+                    } else if (c.item.state === ItemState.BURNED) {
+                        spawnSizzleSmoke(c.x, c.y, '#1e293b');
+                    }
+                }
+            });
+        }
+
+        function spawnOrder() {
+            if (activeOrders.length >= 4) return;
+            const recipe = RECIPES[Math.floor(Math.random() * RECIPES.length)];
+            activeOrders.push({
+                id: Math.random().toString(36).substring(7),
+                recipe: recipe,
+                maxDuration: 28,
+                timeLeft: 28
+            });
+            renderOrdersUI();
+        }
+
+        function updateOrders(delta) {
+            for (let i = activeOrders.length - 1; i >= 0; i--) {
+                const o = activeOrders[i];
+                o.timeLeft -= delta;
+                if (o.timeLeft <= 0) {
+                    score = Math.max(0, score - 20);
+                    activeOrders.splice(i, 1);
+                    sfx.playError();
+                    renderOrdersUI();
+                    spawnOrder();
+                }
+            }
+        }
+
+        function submitOrder(item) {
+            let matched = -1;
+            for (let i = 0; i < activeOrders.length; i++) {
+                const req = activeOrders[i].recipe;
+                if (req.type === item.type && req.state === item.state) {
+                    matched = i;
+                    break;
+                }
+            }
+
+            if (matched !== -1) {
+                const ord = activeOrders[matched];
+                const tip = Math.floor((ord.timeLeft / ord.maxDuration) * 30);
+                const gained = ord.recipe.score + tip;
+                score += gained;
+                completedOrders++;
+
+                addFloatText(player.x, player.y - 35, `+${gained} (小費+${tip})! 🌟`, '#34d399');
+                activeOrders.splice(matched, 1);
+                player.heldItem = null;
+                sfx.playSuccess();
+                renderOrdersUI();
+                spawnOrder();
+            } else {
+                score = Math.max(0, score - 15);
+                player.heldItem = null;
+                sfx.playError();
+                addFloatText(player.x, player.y - 35, '出餐錯誤 -15 ❌', '#f87171');
+            }
+            document.getElementById('score-text').innerText = score;
+        }
+
+        function renderOrdersUI() {
+            const container = document.getElementById('orders-container');
+            container.innerHTML = '';
+
+            activeOrders.forEach(o => {
+                const pct = Math.max(0, (o.timeLeft / o.maxDuration) * 100);
+                const barColor = pct > 45 ? 'bg-emerald-500' : (pct > 20 ? 'bg-amber-500' : 'bg-rose-500');
+
+                const ingredientsHtml = o.recipe.ingredients.map(ing => `
+                    <div class="flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[9px] font-semibold ${ing.bg}">
+                        <span>${ing.icon}</span>
+                        <span>${ing.note}</span>
+                    </div>
+                `).join('');
+
+                const card = document.createElement('div');
+                card.className = "bg-slate-900/95 border border-slate-700 rounded-xl p-2 shadow-lg flex flex-col w-28 md:w-32 backdrop-blur-md transition-all";
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <span class="text-xl md:text-2xl">${o.recipe.icon}</span>
+                        <span class="text-[11px] font-black text-amber-300 bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-500/30">+${o.recipe.score}</span>
+                    </div>
+                    <div class="text-[11px] font-bold text-slate-100 mt-1 truncate">${o.recipe.name}</div>
+                    
+                    <div class="flex flex-wrap gap-1 mt-1.5 mb-1.5">
+                        ${ingredientsHtml}
+                    </div>
+
+                    <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden mt-auto">
+                        <div class="${barColor} h-full transition-all duration-200" style="width: ${pct}%"></div>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function addFloatText(x, y, text, color = '#fbbf24') {
+            floatTexts.push({ x, y, text, color, alpha: 1.0 });
+        }
+
+        function spawnSizzleSmoke(x, y, color) {
+            particles.push({
+                x: x + (Math.random() - 0.5) * 20,
+                y: y + (Math.random() - 0.5) * 15,
+                vx: (Math.random() - 0.5) * 15,
+                vy: -Math.random() * 28 - 10,
+                radius: Math.random() * 4 + 2,
+                color: color,
+                alpha: 0.7,
+                life: 0.6
+            });
+        }
+
+        function spawnChopParticles(x, y, type) {
+            let color = '#f87171';
+            if (type === ItemType.TOMATO) color = '#f43f5e';
+            if (type === ItemType.LETTUCE) color = '#22c55e';
+            if (type === ItemType.CHEESE) color = '#fbbf24';
+            for (let i = 0; i < 3; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 70,
+                    vy: (Math.random() - 0.5) * 70,
+                    radius: 3,
+                    color: color,
+                    alpha: 1.0,
+                    life: 0.35
+                });
+            }
+        }
+
+        function spawnConfetti(x, y) {
+            const colors = ['#f59e0b', '#10b981', '#3b82f6', '#ec4899'];
+            for (let i = 0; i < 16; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 120,
+                    vy: (Math.random() - 0.5) * 120,
+                    radius: Math.random() * 3 + 2,
+                    color: colors[i % colors.length],
+                    alpha: 1.0,
+                    life: 0.6
+                });
+            }
+        }
+
+        function updatePlayer(delta) {
+            let moveX = 0;
+            let moveY = 0;
+
+            if (keys.up) moveY -= 1;
+            if (keys.down) moveY += 1;
+            if (keys.left) moveX -= 1;
+            if (keys.right) moveX += 1;
+
+            if (joystickActive) {
+                moveX = joyVector.x;
+                moveY = joyVector.y;
+            }
+
+            const len = Math.hypot(moveX, moveY);
+            if (len > 0.05) {
+                const normX = moveX / len;
+                const normY = moveY / len;
+
+                player.dirX = normX;
+                player.dirY = normY;
+
+                const stepX = normX * player.speed * delta;
+                const stepY = normY * player.speed * delta;
+
+                // 分離 X 軸碰撞（實現流暢貼牆滑行）
+                const nextX = player.x + stepX;
+                let collideX = false;
+                for (let c of counters) {
+                    if (Math.abs(nextX - c.x) < (c.w / 2 + player.radius - 3) &&
+                        Math.abs(player.y - c.y) < (c.h / 2 + player.radius - 3)) {
+                        collideX = true;
+                        break;
+                    }
+                }
+                if (!collideX && Math.abs(nextX) < 225) {
+                    player.x = nextX;
+                }
+
+                // 分離 Y 軸碰撞
+                const nextY = player.y + stepY;
+                let collideY = false;
+                for (let c of counters) {
+                    if (Math.abs(player.x - c.x) < (c.w / 2 + player.radius - 3) &&
+                        Math.abs(nextY - c.y) < (c.h / 2 + player.radius - 3)) {
+                        collideY = true;
+                        break;
+                    }
+                }
+                if (!collideY && Math.abs(nextY) < 195) {
+                    player.y = nextY;
+                }
+
+                player.bounce = Math.sin(Date.now() * 0.018) * 3;
+            } else {
+                player.bounce = 0;
+            }
+
+            player.targetCounter = getTargetCounter();
+        }
+
+        function drawTileFloor() {
+            const tileSize = 44;
+            const startX = -320;
+            const endX = 320;
+            const startY = -300;
+            const endY = 300;
+
+            for (let x = startX; x < endX; x += tileSize) {
+                for (let y = startY; y < endY; y += tileSize) {
+                    const isEven = (Math.floor(x / tileSize) + Math.floor(y / tileSize)) % 2 === 0;
+                    ctx.fillStyle = isEven ? '#1e293b' : '#334155';
+                    ctx.fillRect(x, y, tileSize, tileSize);
+                }
+            }
+
+            // 外圍牆面陰影邊界
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 14;
+            ctx.strokeRect(-240, -220, 480, 440);
+        }
+
+        function drawCounter(c) {
+            ctx.save();
+            ctx.translate(c.x, c.y);
+
+            // 邊緣選中亮藍色外框
+            if (player.targetCounter === c) {
+                ctx.strokeStyle = '#38bdf8';
+                ctx.lineWidth = 3.5;
+                ctx.strokeRoundRect(-c.w / 2 - 2, -c.h / 2 - 2, c.w + 4, c.h + 4, 12);
+            }
+
+            // 陰影
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillRoundRect(-c.w / 2 + 4, -c.h / 2 + 6, c.w, c.h, 10);
+
+            let topColor = '#64748b';
+            let rimColor = '#94a3b8';
+
+            if (c.type.startsWith('CRATE')) {
+                topColor = '#b45309';
+                rimColor = '#d97706';
+            } else if (c.type === CounterType.CHOPPING) {
+                topColor = '#d97706';
+                rimColor = '#f59e0b';
+            } else if (c.type === CounterType.STOVE) {
+                topColor = '#334155';
+                rimColor = '#475569';
+            } else if (c.type === CounterType.DELIVERY) {
+                topColor = '#047857';
+                rimColor = '#10b981';
+            } else if (c.type === CounterType.TRASH) {
+                topColor = '#991b1b';
+                rimColor = '#dc2626';
+            }
+
+            // 檯身
+            ctx.fillStyle = rimColor;
+            ctx.fillRoundRect(-c.w / 2, -c.h / 2, c.w, c.h, 10);
+
+            // 檯面內凹
+            ctx.fillStyle = topColor;
+            ctx.fillRoundRect(-c.w / 2 + 4, -c.h / 2 + 4, c.w - 8, c.h - 8, 8);
+
+            // 檯面專屬裝飾
+            if (c.type === CounterType.STOVE) {
+                // 爐火黑盤與金屬手柄
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(0, 0, 20, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (c.item && c.item.state === ItemState.CHOPPED) {
+                    ctx.strokeStyle = '#f97316';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+            } else if (c.type === CounterType.CHOPPING) {
+                // 木質紋理砧板
+                ctx.fillStyle = '#fef3c7';
+                ctx.fillRoundRect(-18, -18, 36, 36, 6);
+                ctx.strokeStyle = '#d97706';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRoundRect(-18, -18, 36, 36, 6);
+            }
+
+            // 檯面圖標
+            ctx.font = '22px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(c.icon || '', 0, c.type.startsWith('CRATE') ? -2 : 0);
+
+            // 工作進度條（切菜 / 烹調）
+            if (c.type === CounterType.CHOPPING && c.chopProgress > 0) {
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(-22, -c.h / 2 - 12, 44, 7);
+                ctx.fillStyle = '#38bdf8';
+                ctx.fillRect(-20, -c.h / 2 - 11, 40 * c.chopProgress, 5);
+            } else if (c.type === CounterType.STOVE && c.item) {
+                if (c.item.state === ItemState.CHOPPED) {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(-22, -c.h / 2 - 12, 44, 7);
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.fillRect(-20, -c.h / 2 - 11, Math.min(40, 40 * (c.timer / 3.6)), 5);
+                } else if (c.item.state === ItemState.COOKED) {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRect(-22, -c.h / 2 - 12, 44, 7);
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fillRect(-20, -c.h / 2 - 11, Math.min(40, 40 * (c.timer / 4.0)), 5);
+                }
+            }
+
+            // 檯面上放置的食物
+            if (c.item) {
+                drawFoodItem(c.item, 0, 0);
+            }
+
+            ctx.restore();
+        }
+
+        function drawFoodItem(item, x, y) {
+            ctx.save();
+            ctx.translate(x, y);
+
+            if (item.type === ItemType.MEAT) {
+                if (item.state === ItemState.RAW) {
+                    ctx.fillStyle = '#dc2626';
+                    ctx.fillRoundRect(-13, -10, 26, 20, 6);
+                    ctx.fillStyle = '#fca5a5';
+                    ctx.fillRect(-8, -4, 5, 8);
+                    ctx.fillRect(2, -7, 6, 4);
+                } else if (item.state === ItemState.CHOPPED) {
+                    ctx.fillStyle = '#b91c1c';
+                    ctx.fillRect(-12, -8, 6, 16);
+                    ctx.fillRect(-3, -8, 6, 16);
+                    ctx.fillRect(6, -8, 6, 16);
+                } else if (item.state === ItemState.COOKED) {
+                    ctx.fillStyle = '#78350f';
+                    ctx.fillRoundRect(-13, -10, 26, 20, 5);
+                    ctx.fillStyle = '#451a03';
+                    ctx.fillRect(-8, -9, 3, 18);
+                    ctx.fillRect(0, -9, 3, 18);
+                    ctx.fillRect(8, -9, 3, 18);
+                } else if (item.state === ItemState.BURNED) {
+                    ctx.fillStyle = '#0f172a';
+                    ctx.fillRoundRect(-13, -10, 26, 20, 5);
+                }
+            } else if (item.type === ItemType.TOMATO) {
+                if (item.state === ItemState.RAW) {
+                    ctx.fillStyle = '#f43f5e';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 11, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#16a34a';
+                    ctx.fillRect(-2, -13, 4, 5);
+                } else {
+                    ctx.fillStyle = '#e11d48';
+                    ctx.beginPath(); ctx.arc(-7, 0, 7.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(7, 0, 7.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.fillStyle = '#fb7185';
+                    ctx.beginPath(); ctx.arc(-7, 0, 3, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(7, 0, 3, 0, Math.PI * 2); ctx.fill();
+                }
+            } else if (item.type === ItemType.LETTUCE) {
+                if (item.state === ItemState.RAW) {
+                    ctx.fillStyle = '#22c55e';
+                    ctx.beginPath();
+                    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = '#86efac';
+                    ctx.beginPath(); ctx.arc(-2, -2, 5, 0, Math.PI * 2); ctx.fill();
+                } else {
+                    ctx.fillStyle = '#15803d';
+                    for (let i = -1; i <= 1; i++) {
+                        ctx.fillRect(i * 7 - 3, -6, 5, 12);
+                    }
+                }
+            } else if (item.type === ItemType.CHEESE) {
+                if (item.state === ItemState.RAW) {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.beginPath();
+                    ctx.moveTo(-12, 10);
+                    ctx.lineTo(12, 10);
+                    ctx.lineTo(12, -8);
+                    ctx.lineTo(-12, 4);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.fillStyle = '#d97706';
+                    ctx.beginPath(); ctx.arc(2, 4, 2.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(-4, 7, 2, 0, Math.PI * 2); ctx.fill();
+                } else {
+                    ctx.fillStyle = '#fbbf24';
+                    ctx.fillRoundRect(-10, -7, 20, 14, 3);
+                    ctx.strokeStyle = '#f59e0b';
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRoundRect(-10, -7, 20, 14, 3);
+                }
+            } else if (item.type === ItemType.BREAD) {
+                ctx.fillStyle = '#d97706';
+                ctx.beginPath();
+                ctx.ellipse(0, 0, 14, 11, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#fef08a';
+                ctx.fillRect(-5, -4, 2, 2);
+                ctx.fillRect(3, -5, 2, 2);
+                ctx.fillRect(-1, 2, 2, 2);
+            } else if (item.type === ItemType.BURGER) {
+                ctx.fillStyle = '#b45309';
+                ctx.fillRoundRect(-13, 2, 26, 8, 3);
+                ctx.fillStyle = '#451a03';
+                ctx.fillRect(-12, -2, 24, 5);
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.arc(0, -2, 13, Math.PI, 0);
+                ctx.fill();
+            } else if (item.type === ItemType.CHEESE_BURGER) {
+                ctx.fillStyle = '#b45309';
+                ctx.fillRoundRect(-13, 3, 26, 7, 3);
+                ctx.fillStyle = '#451a03';
+                ctx.fillRect(-12, 0, 24, 4);
+                ctx.fillStyle = '#fbbf24';
+                ctx.fillRect(-14, -2, 28, 3);
+                ctx.fillStyle = '#f59e0b';
+                ctx.beginPath();
+                ctx.arc(0, -2, 13, Math.PI, 0);
+                ctx.fill();
+            } else if (item.type === ItemType.CAPRESE) {
+                ctx.fillStyle = '#e11d48';
+                ctx.beginPath(); ctx.arc(-6, 0, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#fbbf24';
+                ctx.beginPath(); ctx.arc(6, 0, 8, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#16a34a';
+                ctx.fillRect(-2, -8, 4, 16);
+            } else if (item.type === ItemType.SALAD) {
+                ctx.fillStyle = '#16a34a';
+                ctx.beginPath(); ctx.arc(-4, 0, 10, 0, Math.PI * 2); ctx.fill();
+                ctx.fillStyle = '#f43f5e';
+                ctx.beginPath(); ctx.arc(5, -2, 6, 0, Math.PI * 2); ctx.fill();
+            } else if (item.type === ItemType.MEAT_SALAD) {
+                ctx.fillStyle = '#78350f';
+                ctx.fillRoundRect(-12, -8, 16, 16, 4);
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath(); ctx.arc(7, 0, 8, 0, Math.PI * 2); ctx.fill();
+            }
+
+            ctx.restore();
+        }
+
+        function drawChef() {
+            ctx.save();
+            ctx.translate(player.x, player.y);
+
+            // 腳底陰影
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+            ctx.beginPath();
+            ctx.ellipse(0, 14, 22, 12, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 廚師身體
+            ctx.fillStyle = '#2563eb';
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#1d4ed8';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+
+            // 白色圍裙
+            ctx.fillStyle = '#f8fafc';
+            ctx.beginPath();
+            ctx.arc(0, 4, 15, 0, Math.PI);
+            ctx.fill();
+
+            // 廚師帽子（彈跳效果）
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(0, -6 + player.bounce, 12, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 朝向指示鼻頭
+            ctx.fillStyle = '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(player.dirX * 18, player.dirY * 18, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 手中拿取的物品
+            if (player.heldItem) {
+                const holdX = player.dirX * 32;
+                const holdY = player.dirY * 32;
+                drawFoodItem(player.heldItem, holdX, holdY);
+            }
+
+            ctx.restore();
+        }
+
+        function render() {
+            const now = performance.now();
+            const delta = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+
+            if (!isGameOver) {
+                gameTime -= delta;
+                if (gameTime <= 0) {
+                    gameTime = 0;
+                    endGame();
+                }
+
+                // 倒數 10 秒緊迫警示音效
+                const currentSec = Math.ceil(gameTime);
+                if (currentSec <= 10 && currentSec !== lastTickSec && currentSec > 0) {
+                    lastTickSec = currentSec;
+                    sfx.playTick();
+                }
+
+                const min = Math.floor(gameTime / 60);
+                const sec = Math.floor(gameTime % 60);
+                const timerEl = document.getElementById('timer-text');
+                timerEl.innerText = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+                if (gameTime <= 10) {
+                    timerEl.classList.remove('text-amber-400');
+                    timerEl.classList.add('text-rose-500', 'animate-pulse');
+                } else {
+                    timerEl.classList.remove('text-rose-500', 'animate-pulse');
+                    timerEl.classList.add('text-amber-400');
+                }
+
+                // 定期補充訂單
+                orderTimer += delta;
+                if (orderTimer > 5.5) {
+                    orderTimer = 0;
+                    spawnOrder();
+                }
+
+                updatePlayer(delta);
+                updateCounters(delta);
+                updateThrownItems(delta);
+                updateOrders(delta);
+            }
+
+            // 清空畫布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.scale(viewScale, viewScale);
+
+            drawTileFloor();
+            counters.forEach(c => drawCounter(c));
+            thrownItems.forEach(t => drawFoodItem(t.item, t.x, t.y));
+            drawChef();
+
+            // 繪製粒子
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.x += p.vx * delta;
+                p.y += p.vy * delta;
+                p.life -= delta;
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                    continue;
+                }
+                ctx.fillStyle = p.color;
+                ctx.globalAlpha = Math.max(0, p.life * p.alpha);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1.0;
+            }
+
+            // 繪製浮動得分文字
+            for (let i = floatTexts.length - 1; i >= 0; i--) {
+                const ft = floatTexts[i];
+                ft.y -= delta * 32;
+                ft.alpha -= delta * 1.1;
+                if (ft.alpha <= 0) {
+                    floatTexts.splice(i, 1);
+                    continue;
+                }
+                ctx.fillStyle = ft.color;
+                ctx.globalAlpha = ft.alpha;
+                ctx.font = 'bold 15px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.globalAlpha = 1.0;
+            }
+
+            ctx.restore();
+            requestAnimationFrame(render);
+        }
+
+        function endGame() {
+            isGameOver = true;
+            sfx.stopBGM();
+            sfx.playSuccess();
+            document.getElementById('gameover-modal').classList.remove('hidden');
+            document.getElementById('final-score').innerText = score;
+            document.getElementById('final-orders').innerText = completedOrders;
+
+            let stars = '⭐';
+            if (score >= 320) stars = '⭐⭐⭐';
+            else if (score >= 180) stars = '⭐⭐';
+            document.getElementById('star-rating').innerText = stars;
+        }
+
+        function restartGame() {
+            gameTime = 60;
+            score = 0;
+            completedOrders = 0;
+            isGameOver = false;
+            activeOrders = [];
+            thrownItems = [];
+            particles = [];
+            floatTexts = [];
+            lastTickSec = -1;
+
+            counters.forEach(c => {
+                c.item = null;
+                c.timer = 0;
+                c.chopProgress = 0;
+            });
+            player.heldItem = null;
+            player.x = 0;
+            player.y = 25;
+
+            document.getElementById('gameover-modal').classList.add('hidden');
+            document.getElementById('score-text').innerText = '0';
+            sfx.init();
+            spawnOrder();
+            spawnOrder();
+        }
+
+        document.getElementById('btn-restart').addEventListener('click', restartGame);
+
+        function resize() {
+            dpr = window.devicePixelRatio || 1;
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+
+            const minDim = Math.min(window.innerWidth, window.innerHeight);
+            viewScale = (minDim / 560) * dpr;
+        }
+        window.addEventListener('resize', resize);
+
+        window.addEventListener('click', () => {
+            window.focus();
+            sfx.init();
+        });
+
+        function initGame() {
+            window.focus();
+            resize();
+            buildKitchenLayout();
+            spawnOrder();
+            spawnOrder();
+            requestAnimationFrame(render);
+        }
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            initGame();
+        } else {
+            window.addEventListener('DOMContentLoaded', initGame);
+        }
+    </script>
+</body>
+</html>
